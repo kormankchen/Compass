@@ -1,6 +1,15 @@
-# Compass
+<p align="center">
+  <img src="assets/logo.svg" width="120" alt="Compass">
+</p>
 
-A Swift navigation framework for iOS that wraps UIKit navigation behind a clean, UIKit-free API. Built with Swift 6, `@MainActor` isolation, and a traversal-based architecture that reads UIKit state directly — no parallel stack to keep in sync.
+<h1 align="center">Compass</h1>
+
+<p align="center">
+  A Swift navigation framework for iOS that wraps UIKit navigation behind a clean, UIKit-free API.<br>
+  Built with Swift 6, <code>@MainActor</code> isolation, and a traversal-based architecture that reads UIKit state directly.
+</p>
+
+---
 
 ## Requirements
 

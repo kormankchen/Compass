@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" fill="none">
+  <!-- Outer circle -->
+  <circle cx="60" cy="60" r="56" fill="#0C0C14"/>
+  <circle cx="60" cy="60" r="56" stroke="#1C3055" stroke-width="1.5"/>
+
+  <!-- Inner dashed ring -->
+  <circle cx="60" cy="60" r="44" stroke="#1C3055" stroke-width="0.75" stroke-dasharray="2 6"/>
+
+  <!-- Cardinal cross lines -->
+  <line x1="60" y1="16" x2="60" y2="104" stroke="#1C3055" stroke-width="0.5"/>
+  <line x1="16" y1="60" x2="104" y2="60" stroke="#1C3055" stroke-width="0.5"/>
+
+  <!-- North needle -->
+  <polygon points="60,20 66,60 60,55 54,60" fill="#0A84FF"/>
+
+  <!-- South needle -->
+  <polygon points="60,100 66,60 60,65 54,60" fill="#1A3A5C"/>
+
+  <!-- Center ring -->
+  <circle cx="60" cy="60" r="5.5" fill="#0C0C14" stroke="#0A84FF" stroke-width="1.5"/>
+  <!-- Center dot -->
+  <circle cx="60" cy="60" r="2.5" fill="#0A84FF"/>
+
+  <!-- N marker -->
+  <text x="60" y="13"
+        text-anchor="middle"
+        font-family="-apple-system, Helvetica Neue, Arial, sans-serif"
+        font-size="7"
+        font-weight="800"
+        fill="#0A84FF">N</text>
+</svg>
