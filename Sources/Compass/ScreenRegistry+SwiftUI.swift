@@ -5,6 +5,6 @@ extension ScreenRegistry {
         _ type: S.Type,
         @ViewBuilder view: @escaping @MainActor (S) -> V
     ) {
-        register(type) { screen in UIHostingController(rootView: view(screen)) }
+        register(type) { context in UIHostingController(rootView: view(context.screen)) }
     }
 }

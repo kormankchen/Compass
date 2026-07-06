@@ -6,7 +6,7 @@ public final class MockScreenRegistry: ScreenRegistry {
 
     public init() {}
 
-    public func register<S: Screen>(_ type: S.Type, factory: @escaping @MainActor (S) -> UIViewController) {
+    public func register<S: Screen>(_ type: S.Type, factory: @escaping @MainActor (ScreenContext<S>) -> UIViewController) {
         registeredTypeIDs.append(ObjectIdentifier(type))
     }
 

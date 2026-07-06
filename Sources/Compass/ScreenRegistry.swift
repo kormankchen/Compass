@@ -1,7 +1,7 @@
 import UIKit
 
 public protocol ScreenRegistry: AnyObject {
-    func register<S: Screen>(_ type: S.Type, factory: @escaping @MainActor (S) -> UIViewController)
+    func register<S: Screen>(_ type: S.Type, factory: @escaping @MainActor (ScreenContext<S>) -> UIViewController)
 }
 
 public protocol NavigatorModule {
@@ -9,14 +9,14 @@ public protocol NavigatorModule {
 }
 
 final class MainRegistry: ScreenRegistry {
-    private var factories: [ObjectIdentifier: @MainActor (AnyHashable) -> UIViewController] = [:]
+    private var factories: [ObjectIdentifier: @MainActor (AnyObject) -> UIViewController] = [:]
 
-    func register<S: Screen>(_ type: S.Type, factory: @escaping @MainActor (S) -> UIViewController) {
-        factories[ObjectIdentifier(type)] = { anyScreen in
-            guard let screen = anyScreen.base as? S else {
+    func register<S: Screen>(_ type: S.Type, factory: @escaping @MainActor (ScreenContext<S>) -> UIViewController) {
+        factories[ObjectIdentifier(type)] = { anyContext in
+            guard let context = anyContext as? ScreenContext<S> else {
                 fatalError("Compass internal error: type mismatch for \(type)")
             }
-            return factory(screen)
+            return factory(context)
         }
     }
 
@@ -25,7 +25,7 @@ final class MainRegistry: ScreenRegistry {
     }
 
     @MainActor
-    func makeViewController<S: Screen>(for screen: S) -> UIViewController? {
-        factories[ObjectIdentifier(S.self)]?(AnyHashable(screen))
+    func makeViewController<S: Screen>(for context: ScreenContext<S>) -> UIViewController? {
+        factories[ObjectIdentifier(S.self)]?(context)
     }
 }

@@ -1,32 +1,56 @@
 import UIKit
 
+// MARK: - CompassNavigationController
+
+// UINavigationController already conforms to UINavigationBarDelegate and sets itself as
+// navigationBar.delegate, so declaring the method here (without override) provides our
+// implementation as the delegate — no separate delegate assignment needed.
+@MainActor
+final class CompassNavigationController: UINavigationController, UINavigationBarDelegate {
+    weak var compassNavigator: MainNavigator?
+
+    func navigationBar(_ navigationBar: UINavigationBar, shouldPop item: UINavigationItem) -> Bool {
+        if let vc = viewControllers.first(where: { $0.navigationItem === item }),
+           let ctx = compassNavigator?.vcContextMap[ObjectIdentifier(vc)] {
+            return ctx.evaluateShouldDismiss()
+        }
+        return true
+    }
+}
+
+// MARK: - MainNavigator
+
 @MainActor
 final class MainNavigator: Navigator {
 
     static var instance: MainNavigator?
 
-    let navController: UINavigationController
+    let navController: CompassNavigationController
     var window: UIWindow?
     private var auxiliaryWindow: UIWindow?
-    // Bug 1 fix: retain the observer token so it can be removed.
     private var auxiliaryWindowObserver: NSObjectProtocol?
     private let registry: MainRegistry
     private let navDelegate: NavigatorDelegate
     var vcScreenMap: [ObjectIdentifier: AnyHashable] = [:]
+    var vcContextMap: [ObjectIdentifier: any AnyScreenContext] = [:]
 
     init<S: Screen>(root: S, registry: MainRegistry) {
-        guard let rootVC = registry.makeViewController(for: root) else {
+        let context = ScreenContext(root)
+        guard let rootVC = registry.makeViewController(for: context) else {
             fatalError("No factory registered for \(type(of: root)). Register it in a NavigatorModule.")
         }
         self.registry = registry
-        navController = UINavigationController(rootViewController: rootVC)
+        let nav = CompassNavigationController(rootViewController: rootVC)
+        navController = nav
         let del = NavigatorDelegate()
         navDelegate = del
         del.owner = self
+        nav.delegate = del
+        nav.compassNavigator = self
         vcScreenMap[ObjectIdentifier(rootVC)] = AnyHashable(root)
+        vcContextMap[ObjectIdentifier(rootVC)] = context
     }
 
-    // Called by Compass.configure before replacing the singleton so observers are always removed.
     func cleanup() {
         dismissAuxiliaryWindow()
     }
@@ -46,7 +70,6 @@ final class MainNavigator: Navigator {
         return (current as? UINavigationController) ?? startNav
     }
 
-    // Bug 4 fix: put the active window's chain first so dismiss(to:) searches the active context first.
     private func collectNavControllerChain() -> [UINavigationController] {
         let primaryRoot: UIViewController?
         let secondaryRoot: UIViewController?
@@ -84,28 +107,32 @@ final class MainNavigator: Navigator {
         return false
     }
 
-    // Bug 1 & 2 fix: single place that removes the observer, hides the window, and cleans up the map.
-    // Removing the observer BEFORE setting isHidden means the notification won't reach the external
-    // dismissal path — no double-cleanup.
     private func dismissAuxiliaryWindow() {
         if let token = auxiliaryWindowObserver {
             NotificationCenter.default.removeObserver(token)
             auxiliaryWindowObserver = nil
+        }
+        if let aux = auxiliaryWindow {
+            let auxVCs = (aux.rootViewController as? UINavigationController)?.viewControllers
+                ?? [aux.rootViewController].compactMap { $0 }
+            auxVCs.forEach { vcContextMap[ObjectIdentifier($0)]?.notifyDidDismiss() }
         }
         auxiliaryWindow?.isHidden = true
         auxiliaryWindow = nil
         window?.makeKey()
         let liveIDs = Set(collectAllVCs().map { ObjectIdentifier($0) })
         vcScreenMap = vcScreenMap.filter { liveIDs.contains($0.key) }
+        vcContextMap = vcContextMap.filter { liveIDs.contains($0.key) }
     }
 
     // MARK: - Navigator
 
-    func route<S: Screen>(to screen: S, via transition: Transition, animated: Bool) {
-        guard let vc = registry.makeViewController(for: screen) else {
-            fatalError("No factory registered for \(type(of: screen)). Register it in a NavigatorModule.")
+    func route<S: Screen>(to context: ScreenContext<S>, via transition: Transition, animated: Bool) {
+        guard let vc = registry.makeViewController(for: context) else {
+            fatalError("No factory registered for \(type(of: context.screen)). Register it in a NavigatorModule.")
         }
-        vcScreenMap[ObjectIdentifier(vc)] = AnyHashable(screen)
+        vcScreenMap[ObjectIdentifier(vc)] = AnyHashable(context.screen)
+        vcContextMap[ObjectIdentifier(vc)] = context
 
         switch transition {
         case .push:
@@ -114,9 +141,6 @@ final class MainNavigator: Navigator {
         case .sheet, .fullScreen, .overFullScreen:
             let childNav = UINavigationController(rootViewController: vc)
             childNav.modalPresentationStyle = transition.uiKitStyle
-            // Bug 3 fix: set the delegate synchronously after present — UIKit creates the
-            // presentationController during the present call, so it is non-nil immediately.
-            // Setting it in the completion block meant shouldDismiss/willDismiss never fired.
             activeNavController.present(childNav, animated: animated)
             childNav.presentationController?.delegate = navDelegate
 
@@ -125,9 +149,6 @@ final class MainNavigator: Navigator {
                 assertionFailure("Compass: no UIWindowScene available for newWindow transition")
                 return
             }
-            // Bug 2 fix: dismiss any existing aux window before creating a new one.
-            // dismissAuxiliaryWindow() removes its observer first, so hiding it won't
-            // re-trigger the external-dismissal path below.
             if auxiliaryWindow != nil { dismissAuxiliaryWindow() }
 
             let childNav = UINavigationController(rootViewController: vc)
@@ -136,9 +157,6 @@ final class MainNavigator: Navigator {
             aux.windowLevel = .alert
             auxiliaryWindow = aux
 
-            // Bug 1 fix: store the token. The observer handles the external case only —
-            // internal dismissal goes through dismissAuxiliaryWindow() which removes the
-            // token before hiding, so this block is never reached for those cases.
             let auxID = ObjectIdentifier(aux)
             auxiliaryWindowObserver = NotificationCenter.default.addObserver(
                 forName: UIWindow.didBecomeHiddenNotification,
@@ -153,24 +171,34 @@ final class MainNavigator: Navigator {
                         NotificationCenter.default.removeObserver(token)
                         self.auxiliaryWindowObserver = nil
                     }
+                    let auxVCs = (current.rootViewController as? UINavigationController)?.viewControllers
+                        ?? [current.rootViewController].compactMap { $0 }
+                    auxVCs.forEach { self.vcContextMap[ObjectIdentifier($0)]?.notifyDidDismiss() }
                     self.auxiliaryWindow = nil
                     self.window?.makeKey()
                     let liveIDs = Set(self.collectAllVCs().map { ObjectIdentifier($0) })
                     self.vcScreenMap = self.vcScreenMap.filter { liveIDs.contains($0.key) }
+                    self.vcContextMap = self.vcContextMap.filter { liveIDs.contains($0.key) }
                 }
             }
             aux.makeKeyAndVisible()
         }
     }
 
-    func dismiss(animated: Bool) {
+    func dismiss(animated: Bool, completion: (() -> Void)?) {
         let active = activeNavController
         if active.viewControllers.count > 1 {
+            CATransaction.begin()
+            CATransaction.setCompletionBlock(completion)
             active.popViewController(animated: animated)
+            CATransaction.commit()
         } else if auxiliaryWindow != nil, isInAuxiliaryHierarchy(active) {
             dismissAuxiliaryWindow()
+            completion?()
         } else if active !== navController {
-            active.dismiss(animated: animated)
+            active.dismiss(animated: animated, completion: completion)
+        } else {
+            completion?()
         }
     }
 
@@ -211,12 +239,40 @@ final class MainNavigator: Navigator {
 // MARK: - NavigatorDelegate
 
 @MainActor
-final class NavigatorDelegate: NSObject, UIAdaptivePresentationControllerDelegate {
+final class NavigatorDelegate: NSObject, UIAdaptivePresentationControllerDelegate, UINavigationControllerDelegate {
     weak var owner: MainNavigator?
+    private var previousTopVC: UIViewController?
+
+    func presentationControllerShouldDismiss(_ presentationController: UIPresentationController) -> Bool {
+        guard let owner else { return true }
+        let presented = presentationController.presentedViewController
+        let rootVC = (presented as? UINavigationController)?.viewControllers.first ?? presented
+        return owner.vcContextMap[ObjectIdentifier(rootVC)]?.evaluateShouldDismiss() ?? true
+    }
 
     func presentationControllerDidDismiss(_ presentationController: UIPresentationController) {
         guard let owner else { return }
+        let presented = presentationController.presentedViewController
+        let rootVC = (presented as? UINavigationController)?.viewControllers.first ?? presented
+        owner.vcContextMap[ObjectIdentifier(rootVC)]?.notifyDidDismiss()
         let liveIDs = Set(owner.collectAllVCs().map { ObjectIdentifier($0) })
         owner.vcScreenMap = owner.vcScreenMap.filter { liveIDs.contains($0.key) }
+        owner.vcContextMap = owner.vcContextMap.filter { liveIDs.contains($0.key) }
+    }
+
+    func navigationController(_ navigationController: UINavigationController,
+                               willShow viewController: UIViewController, animated: Bool) {
+        previousTopVC = navigationController.viewControllers.last
+    }
+
+    func navigationController(_ navigationController: UINavigationController,
+                               didShow viewController: UIViewController, animated: Bool) {
+        if let popped = previousTopVC, !navigationController.viewControllers.contains(popped) {
+            let id = ObjectIdentifier(popped)
+            owner?.vcContextMap[id]?.notifyDidDismiss()
+            owner?.vcContextMap.removeValue(forKey: id)
+            owner?.vcScreenMap.removeValue(forKey: id)
+        }
+        previousTopVC = nil
     }
 }
