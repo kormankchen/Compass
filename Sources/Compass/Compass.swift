@@ -9,6 +9,7 @@ public enum Compass {
     ) {
         let registry = MainRegistry()
         registry.register(modules: modules)
+        MainNavigator.instance?.cleanup()
         let nav = MainNavigator(root: root, registry: registry)
         MainNavigator.instance = nav
         let window = UIWindow(windowScene: scene)

@@ -8,6 +8,8 @@ final class MainNavigator: Navigator {
     let navController: UINavigationController
     var window: UIWindow?
     private var auxiliaryWindow: UIWindow?
+    // Bug 1 fix: retain the observer token so it can be removed.
+    private var auxiliaryWindowObserver: NSObjectProtocol?
     private let registry: MainRegistry
     private let navDelegate: NavigatorDelegate
     var vcScreenMap: [ObjectIdentifier: AnyHashable] = [:]
@@ -22,6 +24,11 @@ final class MainNavigator: Navigator {
         navDelegate = del
         del.owner = self
         vcScreenMap[ObjectIdentifier(rootVC)] = AnyHashable(root)
+    }
+
+    // Called by Compass.configure before replacing the singleton so observers are always removed.
+    func cleanup() {
+        dismissAuxiliaryWindow()
     }
 
     // MARK: - Traversal Helpers
@@ -39,21 +46,28 @@ final class MainNavigator: Navigator {
         return (current as? UINavigationController) ?? startNav
     }
 
+    // Bug 4 fix: put the active window's chain first so dismiss(to:) searches the active context first.
     private func collectNavControllerChain() -> [UINavigationController] {
-        var chain: [UINavigationController] = []
-        var current: UIViewController? = navController
-        while let vc = current {
-            if let nav = vc as? UINavigationController { chain.append(nav) }
-            current = vc.presentedViewController
+        let primaryRoot: UIViewController?
+        let secondaryRoot: UIViewController?
+        if let aux = auxiliaryWindow, aux.isKeyWindow {
+            primaryRoot = aux.rootViewController
+            secondaryRoot = navController
+        } else {
+            primaryRoot = navController
+            secondaryRoot = auxiliaryWindow?.rootViewController
         }
-        if let aux = auxiliaryWindow,
-           let auxNav = aux.rootViewController as? UINavigationController {
-            var auxCurrent: UIViewController? = auxNav
-            while let vc = auxCurrent {
+
+        var chain: [UINavigationController] = []
+        func walk(_ root: UIViewController?) {
+            var current = root
+            while let vc = current {
                 if let nav = vc as? UINavigationController { chain.append(nav) }
-                auxCurrent = vc.presentedViewController
+                current = vc.presentedViewController
             }
         }
+        walk(primaryRoot)
+        walk(secondaryRoot)
         return chain
     }
 
@@ -68,6 +82,21 @@ final class MainNavigator: Navigator {
             current = vc.presentedViewController
         }
         return false
+    }
+
+    // Bug 1 & 2 fix: single place that removes the observer, hides the window, and cleans up the map.
+    // Removing the observer BEFORE setting isHidden means the notification won't reach the external
+    // dismissal path — no double-cleanup.
+    private func dismissAuxiliaryWindow() {
+        if let token = auxiliaryWindowObserver {
+            NotificationCenter.default.removeObserver(token)
+            auxiliaryWindowObserver = nil
+        }
+        auxiliaryWindow?.isHidden = true
+        auxiliaryWindow = nil
+        window?.makeKey()
+        let liveIDs = Set(collectAllVCs().map { ObjectIdentifier($0) })
+        vcScreenMap = vcScreenMap.filter { liveIDs.contains($0.key) }
     }
 
     // MARK: - Navigator
@@ -85,22 +114,33 @@ final class MainNavigator: Navigator {
         case .sheet, .fullScreen, .overFullScreen:
             let childNav = UINavigationController(rootViewController: vc)
             childNav.modalPresentationStyle = transition.uiKitStyle
-            activeNavController.present(childNav, animated: animated) {
-                childNav.presentationController?.delegate = self.navDelegate
-            }
+            // Bug 3 fix: set the delegate synchronously after present — UIKit creates the
+            // presentationController during the present call, so it is non-nil immediately.
+            // Setting it in the completion block meant shouldDismiss/willDismiss never fired.
+            activeNavController.present(childNav, animated: animated)
+            childNav.presentationController?.delegate = navDelegate
 
         case .newWindow:
             guard let scene = window?.windowScene else {
                 assertionFailure("Compass: no UIWindowScene available for newWindow transition")
                 return
             }
+            // Bug 2 fix: dismiss any existing aux window before creating a new one.
+            // dismissAuxiliaryWindow() removes its observer first, so hiding it won't
+            // re-trigger the external-dismissal path below.
+            if auxiliaryWindow != nil { dismissAuxiliaryWindow() }
+
             let childNav = UINavigationController(rootViewController: vc)
             let aux = UIWindow(windowScene: scene)
             aux.rootViewController = childNav
             aux.windowLevel = .alert
             auxiliaryWindow = aux
+
+            // Bug 1 fix: store the token. The observer handles the external case only —
+            // internal dismissal goes through dismissAuxiliaryWindow() which removes the
+            // token before hiding, so this block is never reached for those cases.
             let auxID = ObjectIdentifier(aux)
-            NotificationCenter.default.addObserver(
+            auxiliaryWindowObserver = NotificationCenter.default.addObserver(
                 forName: UIWindow.didBecomeHiddenNotification,
                 object: aux,
                 queue: .main
@@ -109,7 +149,12 @@ final class MainNavigator: Navigator {
                     guard let self,
                           let current = self.auxiliaryWindow,
                           ObjectIdentifier(current) == auxID else { return }
+                    if let token = self.auxiliaryWindowObserver {
+                        NotificationCenter.default.removeObserver(token)
+                        self.auxiliaryWindowObserver = nil
+                    }
                     self.auxiliaryWindow = nil
+                    self.window?.makeKey()
                     let liveIDs = Set(self.collectAllVCs().map { ObjectIdentifier($0) })
                     self.vcScreenMap = self.vcScreenMap.filter { liveIDs.contains($0.key) }
                 }
@@ -122,10 +167,8 @@ final class MainNavigator: Navigator {
         let active = activeNavController
         if active.viewControllers.count > 1 {
             active.popViewController(animated: animated)
-        } else if let aux = auxiliaryWindow, isInAuxiliaryHierarchy(active) {
-            aux.isHidden = true
-            auxiliaryWindow = nil
-            window?.makeKey()
+        } else if auxiliaryWindow != nil, isInAuxiliaryHierarchy(active) {
+            dismissAuxiliaryWindow()
         } else if active !== navController {
             active.dismiss(animated: animated)
         }
@@ -147,10 +190,8 @@ final class MainNavigator: Navigator {
 
                 let targetVC = vc
 
-                if !isInAuxiliaryHierarchy(nav), let aux = auxiliaryWindow {
-                    aux.isHidden = true
-                    auxiliaryWindow = nil
-                    window?.makeKey()
+                if !isInAuxiliaryHierarchy(nav), auxiliaryWindow != nil {
+                    dismissAuxiliaryWindow()
                 }
 
                 if nav.presentedViewController != nil {
