@@ -50,14 +50,14 @@ struct LoginScreen: Screen {}
 
 ## Modules
 
-Modules register factory closures for each screen. UIKit (or SwiftUI) lives here.
+Modules register factory closures for each screen. UIKit (or SwiftUI) lives here. The factory receives a `ScreenContext` wrapping the screen value — use `context.screen` to access it.
 
 ```swift
 struct ProfileModule: NavigatorModule {
     static func register(in registry: any ScreenRegistry) {
         // UIKit
-        registry.register(ProfileScreen.self) { screen in
-            ProfileViewController(userID: screen.userID)
+        registry.register(ProfileScreen.self) { context in
+            ProfileViewController(userID: context.screen.userID)
         }
         // SwiftUI
         registry.register(HomeScreen.self) { _ in
@@ -84,6 +84,11 @@ Compass.shared.route(to: AlertScreen(), via: .newWindow)
 // Dismiss top
 Compass.shared.dismiss()
 
+// Dismiss with completion — fires when the animation finishes
+Compass.shared.dismiss(completion: {
+    Compass.shared.route(to: ConfirmationScreen(), via: .push)
+})
+
 // Dismiss to first occurrence of a screen type
 try Compass.shared.dismiss(to: ProfileScreen.self)
 
@@ -92,6 +97,49 @@ try Compass.shared.dismiss(to: ProfileScreen.self, matching: { $0.userID == "42"
 ```
 
 `dismiss(to:)` traverses the entire UIKit hierarchy — across push stacks and modal levels — and unwinds everything above the target in a single call.
+
+## Navigation Observations
+
+Pass a `ScreenContext` to `route` to observe navigation events for that presentation. The same context is also received by the factory, so each side can register what it owns.
+
+**Guarding dismissal** — register from the factory, where the VC state lives:
+
+```swift
+registry.register(FormScreen.self) { context in
+    let vc = FormViewController(form: context.screen)
+    context.addObservation(.shouldDismiss { [weak vc] in
+        vc?.hasUnsavedChanges == false
+    })
+    return vc
+}
+```
+
+When `shouldDismiss` returns `false`, swipe-to-dismiss (sheets) and swipe-to-pop / back button (push) are blocked. Multiple `.shouldDismiss` observations are AND-composed — all must return `true`.
+
+**Reacting to dismissal** — register at the call site, where the presenter lives:
+
+```swift
+let context = ScreenContext(FormScreen())
+context.addObservation(.didDismiss {
+    viewModel.reloadData()
+})
+Compass.shared.route(to: context, via: .sheet)
+```
+
+Both observations can be combined on the same context:
+
+```swift
+context.addObservation(
+    .shouldDismiss { !isDirty },
+    .didDismiss { analytics.track("form_closed") }
+)
+```
+
+Passing a raw screen value still works — a context is created automatically:
+
+```swift
+Compass.shared.route(to: HomeScreen(), via: .push) // unchanged
+```
 
 ## Transitions
 
