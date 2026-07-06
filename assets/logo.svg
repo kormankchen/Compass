@@ -1,25 +1,45 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" fill="none">
-  <!-- Outer circle -->
-  <circle cx="60" cy="60" r="56" fill="#0C0C14"/>
-  <circle cx="60" cy="60" r="56" stroke="#1C3055" stroke-width="1.5"/>
+  <defs>
+    <clipPath id="c">
+      <circle cx="60" cy="60" r="56"/>
+    </clipPath>
+    <!-- Minor grid: 8px spacing -->
+    <pattern id="mg" x="4" y="4" width="8" height="8" patternUnits="userSpaceOnUse">
+      <path d="M8 0H0V8" stroke="white" stroke-opacity="0.13" stroke-width="0.4" fill="none"/>
+    </pattern>
+    <!-- Major grid: 40px spacing, filled with minor grid -->
+    <pattern id="Mg" x="0" y="0" width="40" height="40" patternUnits="userSpaceOnUse">
+      <rect width="40" height="40" fill="url(#mg)"/>
+      <path d="M40 0H0V40" stroke="white" stroke-opacity="0.28" stroke-width="0.75" fill="none"/>
+    </pattern>
+  </defs>
+
+  <!-- Blueprint blue background -->
+  <circle cx="60" cy="60" r="56" fill="#1650C8"/>
+
+  <!-- Blueprint grid, clipped to circle -->
+  <rect width="120" height="120" fill="url(#Mg)" clip-path="url(#c)"/>
+
+  <!-- Outer ring -->
+  <circle cx="60" cy="60" r="56" stroke="white" stroke-opacity="0.25" stroke-width="1.5"/>
 
   <!-- Inner dashed ring -->
-  <circle cx="60" cy="60" r="44" stroke="#1C3055" stroke-width="0.75" stroke-dasharray="2 6"/>
+  <circle cx="60" cy="60" r="44" stroke="white" stroke-opacity="0.22" stroke-width="0.75" stroke-dasharray="2 6"/>
 
   <!-- Cardinal cross lines -->
-  <line x1="60" y1="16" x2="60" y2="104" stroke="#1C3055" stroke-width="0.5"/>
-  <line x1="16" y1="60" x2="104" y2="60" stroke="#1C3055" stroke-width="0.5"/>
+  <line x1="60" y1="16" x2="60" y2="104" stroke="white" stroke-opacity="0.22" stroke-width="0.5"/>
+  <line x1="16" y1="60" x2="104" y2="60" stroke="white" stroke-opacity="0.22" stroke-width="0.5"/>
 
   <!-- North needle -->
-  <polygon points="60,20 66,60 60,55 54,60" fill="#0A84FF"/>
+  <polygon points="60,20 66,60 60,55 54,60" fill="white"/>
 
   <!-- South needle -->
-  <polygon points="60,100 66,60 60,65 54,60" fill="#1A3A5C"/>
+  <polygon points="60,100 66,60 60,65 54,60" fill="white" fill-opacity="0.3"/>
 
   <!-- Center ring -->
-  <circle cx="60" cy="60" r="5.5" fill="#0C0C14" stroke="#0A84FF" stroke-width="1.5"/>
+  <circle cx="60" cy="60" r="5.5" fill="#1650C8" stroke="white" stroke-width="1.5"/>
   <!-- Center dot -->
-  <circle cx="60" cy="60" r="2.5" fill="#0A84FF"/>
+  <circle cx="60" cy="60" r="2.5" fill="white"/>
 
   <!-- N marker -->
   <text x="60" y="13"
@@ -27,5 +47,5 @@
         font-family="-apple-system, Helvetica Neue, Arial, sans-serif"
         font-size="7"
         font-weight="800"
-        fill="#0A84FF">N</text>
+        fill="white">N</text>
 </svg>
